@@ -72,26 +72,30 @@ def pdf_to_text(pdf_path: str, lang="spa") -> str:
         texts.append(t)
     return "\n".join(texts)
 
+
+def load_important_words(path: str) -> List[str]:
+    if not os.path.exists(path):
+        print(f"[WARN] Important words file {path} not found. Usando valores por defecto.")
+        return ["Contrato", "Cláusula", "Artículo"]
+    with open(path, "r", encoding="utf-8") as f:
+        words = [line.strip() for line in f if line.strip()]
+    return words
+
 # -----------------------
 # Preprocessing: chunking & semantic section splits
 # -----------------------
-def split_by_headings(text: str) -> List[str]:
-    """
-    Intenta separar por títulos comunes en contratos (Ej.: 'Artículo', 'Cláusula', 'CONTRATO', line breaks grandes)
-    Fallback: chunk por tamaño de palabras.
-    """
-    # Normalizar saltos de línea
+def split_by_headings(text: str, headings: List[str]) -> List[str]:
     text = re.sub(r'\r\n', '\n', text)
-    # Split using common section keywords
-    headings = re.split(r'(\n\s*(Artículo|ARTICULO|Cláusula|CLÁUSULA|CONTRATO|Contrato|ART\.)[^\\n]*)', text)
-    # headings will include separators; reconstruct sensible blocks
+    # Construir regex dinámico para encabezados, escape y case insensitive
+    escaped = [re.escape(h) for h in headings]
+    pattern = r'(\n\s*(?:' + '|'.join(escaped) + r')[^\n]*)'
+    parts = re.split(pattern, text, flags=re.IGNORECASE)
+
     blocks = []
-    if len(headings) > 1:
-        # Combine pairs (separator + text) heuristically
+    if len(parts) > 1:
         curr = ""
-        for part in headings:
-            if re.match(r'\n\s*(Artículo|ARTICULO|Cláusula|CLÁUSULA|CONTRATO|Contrato|ART\.)', part or ""):
-                # treat as new header
+        for part in parts:
+            if re.match(pattern, part or "", re.IGNORECASE):
                 if curr.strip():
                     blocks.append(curr.strip())
                 curr = part
@@ -100,10 +104,11 @@ def split_by_headings(text: str) -> List[str]:
         if curr.strip():
             blocks.append(curr.strip())
     else:
-        # fallback: chunk by word count
+        # fallback: chunk por tamaño
         words = text.split()
         blocks = [" ".join(words[i:i+CHUNK_WORD_SIZE]) for i in range(0, len(words), CHUNK_WORD_SIZE)]
-    # ensure no too-large blocks: further chunk any block > 2*CHUNK_WORD_SIZE
+
+    # Further chunk large blocks
     final = []
     for b in blocks:
         w = b.split()
@@ -114,6 +119,7 @@ def split_by_headings(text: str) -> List[str]:
             final.append(b)
     return final
 
+
 # -----------------------
 # Entity extraction (heuristic / regex)
 # -----------------------
@@ -121,18 +127,26 @@ DATE_RE = re.compile(r'(\d{1,2}\s+de\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+\s+\d{4}
 CONTRACT_RE = re.compile(r'(?:Contrato|CONTRATO|contrato)\s*[:#]?\s*(\d{2,20})', re.IGNORECASE)
 SINDICATE_RE = re.compile(r'(Sindicat[oa][\s:–-]*[A-Za-z0-9ÁÉÍÓÚÜñÑ\-\s]{2,60})', re.IGNORECASE)
 
-def extract_entities(text: str) -> Dict[str, Any]:
+def extract_entities(text: str, important_words: List[str]) -> Dict[str, Any]:
     ents = {}
-    m = CONTRACT_RE.search(text)
-    if m:
-        ents['contract_number'] = m.group(1).strip()
+    # Por ejemplo: buscamos si alguna palabra aparece y extraemos la línea donde aparece
+    lines = text.split('\n')
+    for w in important_words:
+        pattern = re.compile(r'\b' + re.escape(w) + r'\b', re.IGNORECASE)
+        for line in lines:
+            if pattern.search(line):
+                # Guardamos la primera aparición o una lista, según convenga
+                ents[w.lower()] = line.strip()
+                break  # solo primera ocurrencia
+    # También se pueden mantener los regex anteriores para fechas o contratos si quieres
+    # Puedes combinar ambos enfoques
+
+    # Por ejemplo, agrego el regex de fecha
     d = DATE_RE.search(text)
     if d:
         ents['last_date_mentioned'] = d.group(1).strip()
-    s = SINDICATE_RE.search(text)
-    if s:
-        ents['union'] = s.group(1).strip()
     return ents
+
 
 # -----------------------
 # Index building
@@ -148,7 +162,8 @@ class ContractStore:
         self.faiss_dim = None
         self.qa_pipeline = None
 
-    def build_from_folder(self, folder: str, lang="spa"):
+    def build_from_folder(self, folder: str, lang="spa", important_words_file="ImportantWords.txt"):
+        important_words = load_important_words(important_words_file)
         folder = Path(folder)
         assert folder.exists(), f"PDF folder {folder} does not exist"
         pdf_files = list(folder.glob("*.pdf"))
@@ -160,8 +175,8 @@ class ContractStore:
             except Exception as e:
                 print(f"[ERROR] Failed converting PDF {pdf_path}: {e}")
                 continue
-            blocks = split_by_headings(text)
-            doc_entities = extract_entities(text)
+            blocks = split_by_headings(text, important_words)
+            doc_entities = extract_entities(text, important_words)
             for i, block in enumerate(blocks):
                 chunk_id = f"{pdf_path.name}__{i}"
                 meta = {

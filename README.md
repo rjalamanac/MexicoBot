@@ -1,36 +1,51 @@
 # Contract Bot
 
-Contract Bot is a Python-based tool that allows you to query PDF contracts using embeddings and a vector store. It supports building a local data store from PDFs and running an interactive chatbot to answer questions.
+Contract Bot es una herramienta en Python que permite consultar contratos en PDF usando embeddings y un vector store. Soporta la construcción de una base de datos local a partir de PDFs y un chatbot interactivo para responder preguntas.
 
 
-## Features
+## Características
 
-- Extract text from PDF documents.
-- Build embeddings and store them in a vector store (`.pkl` file).
-- Query your PDFs using a chatbot interface.
-- Dockerized for easy deployment.
-
-
-
-## Requirements
-
-- Docker
-- Python 3.10+ (if running locally)
-- Tesseract OCR (for scanned PDFs, optional)
-- Python dependencies (`requirements.txt` provided)
+* Extracción de texto de documentos PDF.
+* Construcción de embeddings y almacenamiento en un vector store (`.pkl`).
+* Consulta de PDFs mediante una interfaz de chatbot.
+* Extracción dinámica de entidades clave desde un archivo externo (`ImportantWords.txt`).
+* Preprocesamiento basado en secciones semánticas usando palabras importantes definidas por el usuario.
+* Dockerizado para fácil despliegue.
 
 
-## Setup
+## Requisitos
 
-### Using Docker
+* Docker
+* Python 3.10+ (si se ejecuta localmente)
+* Tesseract OCR (para PDFs escaneados, opcional)
+* Dependencias Python (`requirements.txt` proporcionado)
 
-Build the Docker image:
+## Configuración
+
+### Archivo `ImportantWords.txt`
+
+Para personalizar la extracción de entidades y el preprocesamiento, crea un archivo llamado `ImportantWords.txt` en la raíz del proyecto, con una palabra clave por línea, por ejemplo:
+
+```
+Contrato
+Cláusula
+Artículo
+```
+
+El sistema leerá estas palabras para identificar secciones importantes y para guiar la división semántica del texto.
+
+
+## Uso
+
+### Usando Docker
+
+Construir la imagen Docker:
 
 ```bash
 docker build -t contract-bot:latest .
-````
+```
 
-Run the container to **build the embeddings and store them**:
+Ejecutar el contenedor para **construir los embeddings y almacenar los datos**:
 
 ```bash
 docker run --rm -it \
@@ -40,57 +55,55 @@ docker run --rm -it \
   python contract_bot.py --build --pdf_folder ./pdfs --datafile ./contract_store.pkl
 ```
 
-* `pdfs` folder contains the PDF documents.
-* `contract_store.pkl` will store the embeddings and vector data.
+* La carpeta `pdfs` contiene los documentos PDF.
+* El archivo `contract_store.pkl` almacenará los embeddings y datos vectoriales.
 
-Run the container to **start the interactive chatbot**:
+Ejecutar el contenedor para **iniciar el chatbot interactivo**:
 
 ```bash
 docker run --rm -it \
   -v ${PWD}/pdfs:/app/pdfs \
   -v ${PWD}:/app \
-  contract-bot
+  contract-bot \
+  python contract_bot.py --ask
 ```
 
-> Make sure the `contract_store.pkl` file exists before running the chatbot.
+> Asegúrate de que `contract_store.pkl` exista antes de ejecutar el chatbot.
 
 
+### Ejecución local (sin Docker)
 
-### Running Locally (without Docker)
-
-1. Install dependencies:
+1. Instalar dependencias:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Place your PDF documents in a folder (e.g., `pdfs/`).
+2. Colocar tus PDFs en una carpeta (ejemplo: `pdfs/`).
 
-3. Build the vector store:
+3. Crear la base de datos vectorial:
 
 ```bash
 python contract_bot.py --build --pdf_folder ./pdfs --datafile ./contract_store.pkl
 ```
 
-4. Run the chatbot:
+4. Ejecutar el chatbot:
 
 ```bash
-python contract_bot.py
+python contract_bot.py --ask
 ```
 
 
+## Opciones de configuración
 
-## Configuration
+* `--pdf_folder`: Carpeta con documentos PDF.
+* `--datafile`: Archivo pickle donde se guardarán embeddings y vectores.
+* `ImportantWords.txt`: Archivo con las palabras clave para extracción y segmentación.
+* OCR Tesseract configurable para PDFs escaneados.
 
-* `--pdf_folder`: Folder containing your PDF documents.
-* `--datafile`: Pickle file where embeddings/vector store will be saved.
-* Optional Tesseract OCR can be configured for scanned PDFs.
+## Notas
 
-
-
-## Notes
-
-* The first run should always include the `--build` step to generate the vector store.
-* Re-run the build step whenever you add or update PDFs.
-* Docker volumes ensure that your PDFs and data store persist outside the container.
+* La primera ejecución debe incluir `--build` para generar la base de datos.
+* Repite el paso de build cada vez que agregues o modifiques PDFs.
+* Los volúmenes Docker aseguran que tus PDFs y datos persistan fuera del contenedor.
 
